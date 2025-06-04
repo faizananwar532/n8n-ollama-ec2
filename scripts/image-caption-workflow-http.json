@@ -1,0 +1,261 @@
+{
+  "meta": {
+    "instanceId": "your-instance-id"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "cdc8c84e-4b06-4c0c-9c86-7d1a9d4e0b2c",
+      "name": "Check S3 Every 5 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        260,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "credentials",
+        "region": "us-east-1",
+        "operation": "getAll",
+        "bucketName": "wills-image-testing",
+        "returnAll": true,
+        "options": {}
+      },
+      "id": "2f1e8c94-d8f9-42b8-a84f-3e2d7c9b1a8f",
+      "name": "List S3 Images",
+      "type": "n8n-nodes-base.awsS3",
+      "typeVersion": 1,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "aws": {
+          "id": "aws-credentials",
+          "name": "AWS Credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "8a2b9e5f-c3d4-4f5e-9876-1a2b3c4d5e6f",
+              "leftValue": "={{ $json.Key }}",
+              "rightValue": "\\.(jpg|jpeg|png|gif|bmp|webp)$",
+              "operator": {
+                "type": "string",
+                "operation": "regex"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7a8b9c0d-1e2f-3456-7890-abcdef123456",
+      "name": "Filter Image Files",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "credentials",
+        "region": "us-east-1",
+        "operation": "download",
+        "bucketName": "wills-image-testing",
+        "fileKey": "={{ $json.Key }}",
+        "options": {}
+      },
+      "id": "9b8a7c6d-5e4f-3210-9876-fedcba987654",
+      "name": "Download Image",
+      "type": "n8n-nodes-base.awsS3",
+      "typeVersion": 1,
+      "position": [
+        860,
+        300
+      ],
+      "credentials": {
+        "aws": {
+          "id": "aws-credentials",
+          "name": "AWS Credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract caption from Ollama response and combine with image data\nconst items = [];\nconst downloadedImages = $('Download Image').all();\n\nfor (let i = 0; i < $input.all().length; i++) {\n  const item = $input.all()[i];\n  let caption = 'No caption generated';\n  let filename = 'unknown';\n  \n  // Extract caption from Ollama response\n  if (item.json && item.json.response) {\n    caption = item.json.response.trim();\n  }\n  \n  // Get filename from corresponding Download Image node data\n  if (downloadedImages && downloadedImages[i] && downloadedImages[i].json && downloadedImages[i].json.Key) {\n    filename = downloadedImages[i].json.Key.split('/').pop();\n  }\n  \n  items.push({\n    json: {\n      filename: filename,\n      caption: caption,\n      processed_at: new Date().toISOString(),\n      full_path: downloadedImages && downloadedImages[i] && downloadedImages[i].json ? downloadedImages[i].json.Key : filename\n    }\n  });\n}\n\nreturn items;"
+      },
+      "id": "3e4f5g6h-789a-12cd-ef01-3456789abcde",
+      "name": "Process Caption Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1260,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Create CSV content from processed image data\nconst allItems = $input.all();\n\n// CSV headers\nconst headers = ['filename', 'caption', 'processed_at'];\nlet csvContent = headers.join(',') + '\\n';\n\n// Add data rows\nfor (const item of allItems) {\n  const row = [\n    `\"${item.json.filename}\"`,\n    `\"${item.json.caption.replace(/\"/g, '\"\"')}\"`, // Escape quotes in caption\n    `\"${item.json.processed_at}\"`\n  ];\n  csvContent += row.join(',') + '\\n';\n}\n\n// Generate filename with timestamp\nconst timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);\nconst csvFilename = `image-captions-${timestamp}.csv`;\n\nreturn [{\n  json: {\n    csvContent: csvContent,\n    filename: csvFilename,\n    totalImages: allItems.length\n  },\n  binary: {\n    data: {\n      data: Buffer.from(csvContent, 'utf8').toString('base64'),\n      mimeType: 'text/csv',\n      fileName: csvFilename\n    }\n  }\n}];"
+      },
+      "id": "5g6h7i8j-9abc-34ef-0123-56789abcdef0",
+      "name": "Create CSV File",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "credentials",
+        "region": "us-east-1",
+        "operation": "upload",
+        "bucketName": "will-csv-output",
+        "fileKey": "={{ $json.filename }}",
+        "binaryData": true,
+        "binaryPropertyName": "data",
+        "options": {}
+      },
+      "id": "6h7i8j9k-abcd-45f0-1234-6789abcdef01",
+      "name": "Upload CSV to S3",
+      "type": "n8n-nodes-base.awsS3",
+      "typeVersion": 1,
+      "position": [
+        1860,
+        300
+      ],
+      "credentials": {
+        "aws": {
+          "id": "aws-credentials",
+          "name": "AWS Credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "=Image Caption Processing Complete!\n\nProcessed {{ $json.totalImages }} images\nCSV file uploaded: {{ $json.filename }}\nTimestamp: {{ new Date().toISOString() }}",
+        "options": {}
+      },
+      "id": "7i8j9k0l-bcde-56f1-2345-789abcdef012",
+      "name": "Success Notification",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2060,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Check S3 Every 5 Minutes": {
+      "main": [
+        [
+          {
+            "node": "List S3 Images",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List S3 Images": {
+      "main": [
+        [
+          {
+            "node": "Filter Image Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Image Files": {
+      "main": [
+        [
+          {
+            "node": "Download Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Image": {
+      "main": [
+        [
+          {
+            "node": "Process Caption Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Caption Data": {
+      "main": [
+        [
+          {
+            "node": "Create CSV File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create CSV File": {
+      "main": [
+        [
+          {
+            "node": "Upload CSV to S3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload CSV to S3": {
+      "main": [
+        [
+          {
+            "node": "Success Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2024-01-15T12:00:00.000Z",
+  "versionId": "1"
+} 
